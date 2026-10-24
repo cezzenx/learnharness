@@ -18,12 +18,14 @@
  */
 
 import type { CallUsage, EmissionStats, ExtractionRunUsage } from "./contracts.ts";
-import { sumSteps, isChatGPTPlan, type CallPricer } from "./prices.ts";
+import { sumSteps, isSubscriptionPlan, planLabel, type CallPricer } from "./prices.ts";
 
 /** One pipeline stage's cumulative cost across every run. */
 export interface StageCost {
-	/** ChatGPT plan stage-runs, excluded from API dollars and unpriced counts. */
+	/** Subscription-plan stage-runs, excluded from API dollars and unpriced counts. */
 	subscriptionRuns?: number;
+	/** The plan labels behind subscriptionRuns, e.g. ["Claude plan"]. */
+	plans?: string[];
 	/** Inferred USD summed over PRICED runs (partial when unpricedRuns > 0). */
 	dollars: number;
 	/** Stage-runs whose model is missing from Pi's catalog (render "—", never zero). */
@@ -37,6 +39,7 @@ export interface StageCost {
 /** One run in the recent-runs list (extraction or naming). */
 export interface RecentRun {
 	subscriptionRuns?: number;
+	plans?: string[];
 	startedAt: number;
 	/** ISO wall-clock. */
 	at: string;
@@ -55,6 +58,7 @@ export interface RecentRun {
 /** The cost pill's whole payload: stage totals + recent runs. */
 export interface GraphCostSummary {
 	subscriptionRuns?: number;
+	plans?: string[];
 	/** Inferred USD across all priced stages of all runs. */
 	totalDollars: number;
 	/** Runs with no priced API stage and at least one unknown stage. */
@@ -90,10 +94,15 @@ const ZERO_TOKENS: CallUsage = {
 
 const emptyStage = (): StageCost => ({ dollars: 0, unpricedRuns: 0, runs: 0, tokens: { ...ZERO_TOKENS } });
 
+function addPlan(stage: StageCost, model: string): void {
+	const label = planLabel(model);
+	if (label && !stage.plans?.includes(label)) stage.plans = [...(stage.plans ?? []), label].sort();
+}
+
 /** One stage's dollars over its steps; null when the model is unpriced
  *  (all-or-nothing: a stage runs one model). */
 function stageDollars(model: string, steps: readonly CallUsage[], price: CallPricer): number | null {
-	if (isChatGPTPlan(model) || steps.length === 0) return null;
+	if (isSubscriptionPlan(model) || steps.length === 0) return null;
 	let total = 0;
 	for (const step of steps) {
 		const c = price(step, model);
@@ -129,14 +138,14 @@ export function graphCostSummary(input: CostSummaryInput, price: CallPricer): Gr
 		extraction.runs++;
 		mergeTokens(extraction.tokens, stages.extractor.steps);
 		const extDollars = stageDollars(stages.extractor.model, stages.extractor.steps, price);
-		if (isChatGPTPlan(stages.extractor.model)) extraction.subscriptionRuns = (extraction.subscriptionRuns ?? 0) + 1;
+		if (isSubscriptionPlan(stages.extractor.model)) { extraction.subscriptionRuns = (extraction.subscriptionRuns ?? 0) + 1; addPlan(extraction, stages.extractor.model); }
 		else if (extDollars === null) extraction.unpricedRuns++;
 		else extraction.dollars += extDollars;
 
 		audit.runs++;
 		mergeTokens(audit.tokens, stages.auditor.steps);
 		const audDollars = stageDollars(stages.auditor.model, stages.auditor.steps, price);
-		if (isChatGPTPlan(stages.auditor.model)) audit.subscriptionRuns = (audit.subscriptionRuns ?? 0) + 1;
+		if (isSubscriptionPlan(stages.auditor.model)) { audit.subscriptionRuns = (audit.subscriptionRuns ?? 0) + 1; addPlan(audit, stages.auditor.model); }
 		else if (audDollars === null) audit.unpricedRuns++;
 		else audit.dollars += audDollars;
 
@@ -145,10 +154,11 @@ export function graphCostSummary(input: CostSummaryInput, price: CallPricer): Gr
 		const runDollars = allStages.every((d) => d === null)
 			? null
 			: allStages.reduce<number>((a, d) => a + (d ?? 0), 0);
-		const subscriptionRuns = [stages.extractor, stages.auditor].filter((stage) => isChatGPTPlan(stage.model)).length;
+		const planStages = [stages.extractor, stages.auditor].filter((stage) => isSubscriptionPlan(stage.model));
+		const subscriptionRuns = planStages.length;
 		const allSteps = [...stages.extractor.steps, ...stages.auditor.steps];
 		runs.push({
-			...(subscriptionRuns ? { subscriptionRuns } : {}),
+			...(subscriptionRuns ? { subscriptionRuns, plans: [...new Set(planStages.map((stage) => planLabel(stage.model)!))].sort() } : {}),
 			startedAt: run.startedAt,
 			at: run.at,
 			durationMs: run.durationMs,
@@ -173,8 +183,9 @@ export function graphCostSummary(input: CostSummaryInput, price: CallPricer): Gr
 	// A run is "unpriced" when it billed nothing countable at all.
 	const unpricedRuns = runs.filter((r) => r.dollars === null && (r.subscriptionRuns ?? 0) < 2).length;
 	const subscriptionRuns = (extraction.subscriptionRuns ?? 0) + (audit.subscriptionRuns ?? 0);
+	const plans = [...new Set([...(extraction.plans ?? []), ...(audit.plans ?? [])])].sort();
 	return {
-		...(subscriptionRuns ? { subscriptionRuns } : {}),
+		...(subscriptionRuns ? { subscriptionRuns, plans } : {}),
 		totalDollars: extraction.dollars + audit.dollars,
 		unpricedRuns,
 		stages: { extraction, audit },

@@ -8,8 +8,13 @@ export function formatUsd(c: number): string {
 	return c >= 1 ? `$${c.toFixed(2)}` : `$${c.toFixed(4)}`;
 }
 
-export function planCostLabel(dollars: number | null, subscription: boolean, format = formatUsd): string {
-	if (subscription) return dollars === null ? "ChatGPT plan" : `${format(dollars)} API + ChatGPT plan`;
+/** `subscription`: false for API-only usage, a plan label ("Claude plan"),
+ *  or true for the legacy ChatGPT-only callers. */
+export function planCostLabel(dollars: number | null, subscription: boolean | string, format = formatUsd): string {
+	if (subscription) {
+		const plan = subscription === true ? "ChatGPT plan" : subscription;
+		return dollars === null ? plan : `${format(dollars)} API + ${plan}`;
+	}
 	return dollars === null ? "—" : format(dollars);
 }
 

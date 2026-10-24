@@ -7,12 +7,38 @@ export interface SessionPricing {
 	cost: number;
 	unpriced: number;
 	subscription?: number;
+	/** The plan labels behind `subscription` turns, e.g. ["Claude plan"]. */
+	plans?: string[];
 	/** Derived at read time, keyed by the persisted turn's id. Never stored. */
 	turnCosts: Record<string, number | null>;
 }
 
 export function isChatGPTPlan(model: string | undefined): boolean {
 	return model?.startsWith("chatgpt:") === true;
+}
+
+/** The subscription plan a usage stamp ("provider:id") runs on, or null
+ *  for API-key usage. Subscription usage is never priced in dollars. */
+export function planLabel(model: string | undefined): string | null {
+	if (model?.startsWith("chatgpt:")) return "ChatGPT plan";
+	if (model?.startsWith("claude-code:")) return "Claude plan";
+	return null;
+}
+
+export function isSubscriptionPlan(model: string | undefined): boolean {
+	return planLabel(model) !== null;
+}
+
+/** "ChatGPT plan", or "ChatGPT plan + Claude plan" when both ran. */
+export function joinPlanLabels(labels: Iterable<string>): string {
+	return [...new Set(labels)].sort().join(" + ");
+}
+
+/** Where to check a plan's usage limits. */
+export function planUsageLink(label: string): { href: string; text: string } | null {
+	if (label === "ChatGPT plan") return { href: "https://chatgpt.com/settings/usage", text: "Manage ChatGPT usage" };
+	if (label === "Claude plan") return { href: "https://claude.ai/settings/usage", text: "Check Claude usage" };
+	return null;
 }
 
 /** Absent stays absent. Long-cache precision is unknown if any write-bearing
@@ -32,7 +58,7 @@ export function sumSteps(steps: readonly CallUsage[]): CallUsage {
 }
 
 export function turnCost(turn: Pick<TurnUsage, "model" | "steps">, price: CallPricer): number | null {
-	if (isChatGPTPlan(turn.model) || turn.steps.length === 0) return null;
+	if (isSubscriptionPlan(turn.model) || turn.steps.length === 0) return null;
 	let total = 0;
 	for (const step of turn.steps) {
 		const cost = price(step, turn.model);
@@ -46,20 +72,22 @@ export function sessionCost(record: Pick<ChatRecord, "turns">, price: CallPricer
 	let cost = 0;
 	let unpriced = 0;
 	let subscription = 0;
+	const plans = new Set<string>();
 	const turnCosts: Record<string, number | null> = {};
 	for (const turn of record.turns ?? []) {
 		const dollars = turnCost(turn, price);
 		turnCosts[turn.id] = dollars;
-		if (isChatGPTPlan(turn.model)) subscription++;
+		const plan = planLabel(turn.model);
+		if (plan) { subscription++; plans.add(plan); }
 		else if (dollars === null) unpriced++;
 		else cost += dollars;
 	}
-	return { cost, unpriced, ...(subscription ? { subscription } : {}), turnCosts };
+	return { cost, unpriced, ...(subscription ? { subscription, plans: [...plans].sort() } : {}), turnCosts };
 }
 
 export function jobCost(job: Pick<JobRecord, "usage">, price: CallPricer): number | null {
 	const usage = job.usage;
-	if (!usage || isChatGPTPlan(usage.model)) return null;
+	if (!usage || isSubscriptionPlan(usage.model)) return null;
 	if (usage.calls && usage.calls.length === usage.steps) {
 		return turnCost({ model: usage.model, steps: usage.calls }, price);
 	}

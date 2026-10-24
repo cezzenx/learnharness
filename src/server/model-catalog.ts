@@ -21,14 +21,23 @@ import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
+import { claudeCodeConnected, claudeCodeModel, claudeCodeModels, claudeCodeStatus, refreshClaudeCodeModels } from "../agent/claude-code/catalog.ts";
+import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/stream.ts";
 
-export async function refreshConnectionCatalog(): Promise<void> {
-	await refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses"));
+/** Refresh the subscription providers' catalogs. `forceClaudeCode` re-checks
+ *  Claude Code now (the Providers Refresh button) instead of using the cache. */
+export async function refreshConnectionCatalog(opts: { forceClaudeCode?: boolean } = {}): Promise<void> {
+	await Promise.all([
+		refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")),
+		refreshClaudeCodeModels(piModels().getModels("anthropic"), opts.forceClaudeCode === true),
+	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
-	return provider === "chatgpt" ? chatGPTModel(id) : piModels().getModel(provider, id);
+	if (provider === "chatgpt") return chatGPTModel(id);
+	if (provider === CLAUDE_CODE_PROVIDER) return claudeCodeModel(id);
+	return piModels().getModel(provider, id);
 }
-function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt"]; }
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", CLAUDE_CODE_PROVIDER]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -134,7 +143,10 @@ export function catalogProviders(): CatalogProvider[] {
 		id: p.id,
 		envVar: p.envVar,
 		keyPresent: keyValue(p.envVar) !== undefined,
-	})).concat([{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() }]).sort((a, b) => a.id.localeCompare(b.id));
+	})).concat([
+		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
+		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeConnected() },
+	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The providers whose key is present — the picker federates exactly
@@ -181,6 +193,7 @@ export function catalogContextLimits(): Map<string, number> {
 		}
 	}
 	for (const model of chatGPTModels()) index.set(`chatgpt:${model.id}`, model.contextWindow);
+	for (const model of claudeCodeModels()) index.set(`${CLAUDE_CODE_PROVIDER}:${model.id}`, model.contextWindow);
 	return index;
 }
 
@@ -196,13 +209,15 @@ export function modelCatalog(): ModelCatalogResponse {
 		.flatMap((p) => piModels().getModels(p.id))
 		.map(toModelDto)
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat(chatGPTModels().map(toModelDto));
+		.concat(chatGPTModels().map(toModelDto))
+		.concat(claudeCodeModels().map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),
 		rolePins: catalogRolePins(),
 		slots: catalogSlots(),
 		providers: catalogProviders(),
+		claudeCode: claudeCodeStatus(),
 	};
 }
 

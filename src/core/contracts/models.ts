@@ -7,6 +7,7 @@
  */
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { BackgroundModelRole, ModelSlotName } from "../settings.ts";
+import type { ClaudeCodeStatus } from "./claude-code.ts";
 
 /** One picker row: everything the UI shows about a model, projected from
  *  pi-ai's catalog. Costs are USD per 1M tokens (the same catalog, the same
@@ -73,6 +74,8 @@ export interface ModelCatalogResponse {
 	 *  are simply absent (the Keys page is the discovery surface, same
 	 *  discipline as the search engines). */
 	providers: CatalogProvider[];
+	/** Claude Code subscription provider status (the Providers row). */
+	claudeCode?: ClaudeCodeStatus;
 }
 
 /** One row of the providers surface. */

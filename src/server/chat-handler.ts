@@ -9,6 +9,7 @@ import {
 import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { chatGPTBackgroundAllowed, chatGPTScopeCurrent } from "../agent/chatgpt-bridge.ts";
 import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
+import { CLAUDE_CODE_PROVIDER, claudeCodeStreamError } from "../agent/claude-code/stream.ts";
 import { ChatGPTRequestCycle, type ChatGPTDispatchLifecycle } from "../agent/chatgpt-request-cycle.ts";
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
@@ -212,6 +213,8 @@ export async function handleChatInput(
 			return Response.json({ error: "ChatGPT background use is off in this app. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
 	}
+	// Claude Code status is cached; this re-checks only when stale (e.g. after a restart).
+	if (conversation.provider === CLAUDE_CODE_PROVIDER) await refreshConnectionCatalog();
 	if (!providerKeyPresent(conversation.provider)) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
@@ -236,7 +239,7 @@ export async function handleChatInput(
 	};
 	let conversationEngine: PiEngine;
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle); }
-	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : "The selected model is unavailable." }, { status: 503 }); }
+	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : conversation.provider === CLAUDE_CODE_PROVIDER ? claudeCodeStreamError("model not available") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	await ensureCompacted(
 		{
@@ -491,6 +494,8 @@ export async function handleChatInput(
 			// transcript directly (the retry context the model saw).
 			onError: (error) => {
 				if (conversation.provider === "chatgpt") return chatGPTStreamError(String(error));
+				// Claude Code errors are already user-facing (claudeCodeStreamError).
+				if (conversation.provider === CLAUDE_CODE_PROVIDER) return error instanceof Error ? error.message : String(error);
 				console.error(`[chat ${chatId}] turn error:`, error);
 				return "An error occurred.";
 			},

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SessionPricing, TurnUsage } from "@/src/core";
+import { joinPlanLabels, planLabel, planUsageLink } from "@/src/core";
 import { formatTokens, formatUsd, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 
@@ -85,11 +86,12 @@ export function StatsBar({
 	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
 	const limit = selectedModel ? limits?.get(selectedModel) ?? null : null;
 	const contextLabel = formatContextMeasurement(contextTokens, limit);
-	const { cost = 0, unpriced = turns.length, subscription = 0 } = pricing ?? {};
+	const { cost = 0, unpriced = turns.length, subscription = 0, plans = [] } = pricing ?? {};
+	const plan = joinPlanLabels(plans.length ? plans : subscription ? ["ChatGPT plan"] : []);
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
 	const pricedCount = turns.length - unpriced - subscription;
-	const costLabel = subscription ? (pricedCount > 0 ? `${formatUsd(cost)} API + ChatGPT plan` : "ChatGPT plan") : pricedCount > 0 ? formatUsd(cost) : "—";
+	const costLabel = subscription ? (pricedCount > 0 ? `${formatUsd(cost)} API + ${plan}` : plan) : pricedCount > 0 ? formatUsd(cost) : "—";
 
 	return (
 		<div
@@ -147,7 +149,10 @@ export function StatsBar({
 								<span>{subscription ? "Usage" : "Total cost"}</span>
 								<span className="tabular-nums text-card-foreground">{costLabel}</span>
 							</div>
-							{subscription > 0 && <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer" className="underline underline-offset-2">Manage ChatGPT usage</a>}
+							{subscription > 0 && (plans.length ? plans : ["ChatGPT plan"]).map((label) => {
+								const link = planUsageLink(label);
+								return link && <a key={label} href={link.href} target="_blank" rel="noreferrer" className="underline underline-offset-2">{link.text}</a>;
+							})}
 							{unpriced > 0 && (
 								<div className="flex justify-between gap-2">
 									<span>Unpriced turns</span>
@@ -170,7 +175,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{turn.model.startsWith("chatgpt:") ? "ChatGPT plan" : c === null ? "—" : formatUsd(c)}</span>
+													<span>{planLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
 												</span>
 											</li>
 										);

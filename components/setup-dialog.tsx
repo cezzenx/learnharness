@@ -45,6 +45,7 @@ import { Hint } from "@/components/ui/hint";
 import { type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { ProviderMenuList } from "@/components/settings/model-menu";
 import { ChatGPTBackgroundAccess, ChatGPTConnection } from "@/components/settings/chatgpt-connection";
+import { ClaudeCodeConnection } from "@/components/settings/claude-code-connection";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -212,6 +213,7 @@ export function SetupKeysBody({
 				)}
 			</div>
 			<div className="mt-2 border-t border-border/60 pt-4"><ChatGPTConnection setup /></div>
+			<div className="mt-3"><ClaudeCodeConnection setup /></div>
 		</div>
 	);
 }

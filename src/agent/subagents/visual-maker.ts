@@ -1,3 +1,4 @@
+import { endClaudeCodeSession } from "../claude-code/session-manager.ts";
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Tool, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
@@ -292,6 +293,9 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		return { svg: "", notes: `FAILED: the maker crashed — ${msg}` };
+	} finally {
+		// A Claude Code engine keeps a live session per sessionId; this run is over.
+		endClaudeCodeSession(sessionId);
 	}
 
 	// Iteration limit: deliver the last written SVG only if it was looked at.

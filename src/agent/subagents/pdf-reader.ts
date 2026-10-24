@@ -1,3 +1,4 @@
+import { endClaudeCodeSession } from "../claude-code/session-manager.ts";
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, ToolResultMessage, Usage, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
@@ -336,6 +337,9 @@ export async function runPdfReaderAgent(
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		return { path: pdfPath, question: input.question, brief: `PDF failed: the reader crashed — ${msg}`, pagesRead: [...read].sort((a, b) => a - b), pagesConsulted: [...consulted].sort((a, b) => a - b) };
+	} finally {
+		// A Claude Code engine keeps a live session per sessionId; this run is over.
+		endClaudeCodeSession(sessionId);
 	}
 
 	// Iteration limit: deliver whatever was honestly consulted (never invention).
